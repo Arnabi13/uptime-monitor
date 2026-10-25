@@ -1,0 +1,43 @@
+# Local development stack.
+#   Just the database (run the API with `npm run start:dev`):  docker compose up -d db
+#   Everything in containers:                                   docker compose up --build
+#
+# Day 4 adds a production version of this file (with Nginx) for the EC2 instance.
+
+services:
+  db:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: uptime
+      POSTGRES_PASSWORD: uptime_dev_password
+      POSTGRES_DB: uptime
+    ports:
+      # Bound to localhost only: reachable from your machine, not from your network.
+        - "127.0.0.1:5433:5432"
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+      # Creates the uptime_test database for e2e tests on first start.
+      - ./docker/postgres-init:/docker-entrypoint-initdb.d:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U uptime -d uptime"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  api:
+    build: ./backend
+    restart: unless-stopped
+    env_file: ./backend/.env
+    environment:
+      # Inside the Compose network the database is reachable by its service name.
+      DB_HOST: db
+      NODE_ENV: production
+    ports:
+      - "127.0.0.1:3000:3000"
+    depends_on:
+      db:
+        condition: service_healthy
+
+volumes:
+  pgdata:

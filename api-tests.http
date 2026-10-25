@@ -1,0 +1,170 @@
+### Manual API tests — open in VS Code with the "REST Client" extension
+### (by Huachao Mao), then click "Send Request" above each request.
+### Start the API first: cd backend && npm run start:dev
+
+@baseUrl = http://localhost:3000/api
+@email = ana.test@example.com
+@password = password123
+
+### 1. Health check — should say status ok, db up
+GET {{baseUrl}}/health
+
+### 2. Register (run once; running it again gives 409 Conflict)
+POST {{baseUrl}}/auth/register
+Content-Type: application/json
+
+{
+  "email": "{{email}}",
+  "password": "{{password}}"
+}
+
+### 3. Login — the token from this response is reused by every request below
+# @name login
+POST {{baseUrl}}/auth/login
+Content-Type: application/json
+
+{
+  "email": "{{email}}",
+  "password": "{{password}}"
+}
+
+### 4. Who am I?
+@token = {{login.response.body.accessToken}}
+GET {{baseUrl}}/auth/me
+Authorization: Bearer {{token}}
+
+### 5. Create a monitor — its id is captured below for steps 7–10
+# @name created
+POST {{baseUrl}}/monitors
+Authorization: Bearer {{token}}
+Content-Type: application/json
+
+{
+  "name": "Example site",
+  "url": "https://example.com",
+  "intervalSeconds": 60
+}
+
+### 6. List my monitors
+GET {{baseUrl}}/monitors
+Authorization: Bearer {{token}}
+
+### 7. Get one monitor
+@monitorId = {{created.response.body.id}}
+GET {{baseUrl}}/monitors/{{monitorId}}
+Authorization: Bearer {{token}}
+
+### 7a. Dashboard overview (uptime + last 30 checks for every monitor)
+GET {{baseUrl}}/monitors/overview
+Authorization: Bearer {{token}}
+
+### 7b. Stats for one monitor
+GET {{baseUrl}}/monitors/{{monitorId}}/stats
+Authorization: Bearer {{token}}
+
+### 7c. Response-time history (24h | 7d | 30d)
+GET {{baseUrl}}/monitors/{{monitorId}}/history?range=24h
+Authorization: Bearer {{token}}
+
+### 7d. Incidents
+GET {{baseUrl}}/monitors/{{monitorId}}/incidents
+Authorization: Bearer {{token}}
+
+### 7e. Show it on the public status page
+PATCH {{baseUrl}}/monitors/{{monitorId}}
+Authorization: Bearer {{token}}
+Content-Type: application/json
+
+{ "isPublic": true }
+
+### 7f. My status page link
+# @name statusPage
+GET {{baseUrl}}/status-page
+Authorization: Bearer {{token}}
+
+### 7g. The public page — no token needed
+GET {{baseUrl}}/public/status/{{statusPage.response.body.slug}}
+
+### 8. Pause it
+PATCH {{baseUrl}}/monitors/{{monitorId}}
+Authorization: Bearer {{token}}
+Content-Type: application/json
+
+{
+  "isActive": false
+}
+
+### 9. Resume it and switch to GET
+PATCH {{baseUrl}}/monitors/{{monitorId}}
+Authorization: Bearer {{token}}
+Content-Type: application/json
+
+{
+  "isActive": true,
+  "method": "GET"
+}
+
+### 10. Delete it (204 No Content), then step 7's GET (rerun it) gives 404
+DELETE {{baseUrl}}/monitors/{{monitorId}}
+Authorization: Bearer {{token}}
+
+
+### ===== Things that SHOULD fail =====
+
+### 11. SSRF: EC2 metadata address → 400
+POST {{baseUrl}}/monitors
+Authorization: Bearer {{token}}
+Content-Type: application/json
+
+{ "name": "evil", "url": "http://169.254.169.254/latest/meta-data/" }
+
+### 12. SSRF: our own machine → 400
+POST {{baseUrl}}/monitors
+Authorization: Bearer {{token}}
+Content-Type: application/json
+
+{ "name": "evil", "url": "http://localhost:5432" }
+
+### 13. SSRF: a Docker container name → 400
+POST {{baseUrl}}/monitors
+Authorization: Bearer {{token}}
+Content-Type: application/json
+
+{ "name": "evil", "url": "http://db:5432" }
+
+### 14. SSRF: 127.0.0.1 disguised as a decimal number → 400
+POST {{baseUrl}}/monitors
+Authorization: Bearer {{token}}
+Content-Type: application/json
+
+{ "name": "evil", "url": "http://2130706433" }
+
+### 15. Interval below 60 seconds → 400
+POST {{baseUrl}}/monitors
+Authorization: Bearer {{token}}
+Content-Type: application/json
+
+{ "name": "too fast", "url": "https://example.org", "intervalSeconds": 10 }
+
+### 16. Trying to set someone else's userId → 400 (unknown field rejected)
+POST {{baseUrl}}/monitors
+Authorization: Bearer {{token}}
+Content-Type: application/json
+
+{ "name": "sneaky", "url": "https://example.org", "userId": "00000000-0000-0000-0000-000000000000" }
+
+### 17. Domain that doesn't exist → 400
+POST {{baseUrl}}/monitors
+Authorization: Bearer {{token}}
+Content-Type: application/json
+
+{ "name": "nope", "url": "https://this-domain-does-not-exist-12345.com" }
+
+### 18. No token → 401
+GET {{baseUrl}}/monitors
+
+### 19. Wrong password → 401 (same message as an unknown email)
+POST {{baseUrl}}/auth/login
+Content-Type: application/json
+
+{ "email": "{{email}}", "password": "wrong-password" }
