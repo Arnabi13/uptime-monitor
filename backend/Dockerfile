@@ -2,6 +2,9 @@
 # Full dev dependencies + TypeScript compiler. None of this ships to production.
 FROM node:22-alpine AS build
 WORKDIR /app
+# Same npm major as the developer machine (npm 11). The npm 10 bundled with
+# node:22 reads npm 11 lockfiles as "out of sync" and `npm ci` fails.
+RUN npm install -g npm@11.6.2 --no-audit --no-fund
 
 # Copy only the manifests first: this layer (npm ci) is cached and only re-runs
 # when dependencies change, not on every code edit.
@@ -15,6 +18,9 @@ RUN npm run build
 # ---------- Stage 2: production dependencies only ----------
 FROM node:22-alpine AS prod-deps
 WORKDIR /app
+# Same npm major as the developer machine (npm 11). The npm 10 bundled with
+# node:22 reads npm 11 lockfiles as "out of sync" and `npm ci` fails.
+RUN npm install -g npm@11.6.2 --no-audit --no-fund
 COPY package.json package-lock.json ./
 RUN npm ci --omit=dev && npm cache clean --force
 

@@ -1,6 +1,9 @@
 # ---------- Stage 1: build the React app ----------
 FROM node:22-alpine AS build
 WORKDIR /app
+# Same npm major as the developer machine (npm 11). The npm 10 bundled with
+# node:22 reads npm 11 lockfiles as "out of sync" and `npm ci` fails.
+RUN npm install -g npm@11.6.2 --no-audit --no-fund
 COPY package.json package-lock.json ./
 RUN npm ci
 COPY . .
