@@ -1,0 +1,64 @@
+# Production stack for the single EC2 instance.
+#
+#   Never run this file directly — use `sh deploy/deploy.sh`, which passes
+#   --env-file backend/.env so the database password is defined in one place.
+#
+#   Internet ──:80──▶ web (Nginx: React app + /api proxy) ──▶ api (NestJS) ──▶ db (Postgres)
+#                                                               │
+#                                                               └──▶ SQS (via the EC2 instance's IAM role)
+#
+# Only Nginx publishes a port. Postgres and the API are reachable only on the
+# private Compose network, so the security group just needs port 80 (and SSH).
+
+x-logging: &default-logging
+  # Without a cap, Docker's JSON logs grow until the 20 GB disk is full.
+  driver: json-file
+  options:
+    max-size: "10m"
+    max-file: "3"
+
+services:
+  db:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${DB_USER:?set DB_USER in backend/.env}
+      POSTGRES_PASSWORD: ${DB_PASSWORD:?set DB_PASSWORD in backend/.env}
+      POSTGRES_DB: ${DB_NAME:?set DB_NAME in backend/.env}
+    # Sized for a 1 GB t3.micro: small shared buffers, few connections
+    # (the API's TypeORM pool uses 10).
+    command: ["postgres", "-c", "shared_buffers=64MB", "-c", "max_connections=30"]
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U $${POSTGRES_USER} -d $${POSTGRES_DB}"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+    logging: *default-logging
+
+  api:
+    build: ./backend
+    restart: unless-stopped
+    env_file: ./backend/.env
+    environment:
+      NODE_ENV: production
+      DB_HOST: db
+      DB_PORT: "5432"
+    depends_on:
+      db:
+        condition: service_healthy
+    logging: *default-logging
+
+  web:
+    build: ./frontend
+    restart: unless-stopped
+    ports:
+      - "80:80"
+    depends_on:
+      api:
+        condition: service_healthy
+    logging: *default-logging
+
+volumes:
+  pgdata:
