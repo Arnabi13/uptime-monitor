@@ -1,0 +1,23 @@
+# Optional override: ship container logs to CloudWatch Logs instead of local files.
+# deploy.sh adds this file automatically when backend/.env contains CLOUDWATCH_LOGS=true.
+#
+# Needs the EC2 instance role to allow logs:CreateLogGroup, logs:CreateLogStream
+# and logs:PutLogEvents (see the README, "Monitoring" section). AWS_REGION comes
+# from backend/.env via --env-file. Log retention is set on the log group itself
+# (set it to 7 days, otherwise logs are kept forever and cost money).
+
+x-cloudwatch: &cloudwatch
+  driver: awslogs
+  options:
+    awslogs-region: ${AWS_REGION}
+    awslogs-group: uptime-monitor
+    awslogs-create-group: "true"
+    tag: "{{.Name}}"          # stream name = container name (api, web, db)
+
+services:
+  db:
+    logging: *cloudwatch
+  api:
+    logging: *cloudwatch
+  web:
+    logging: *cloudwatch

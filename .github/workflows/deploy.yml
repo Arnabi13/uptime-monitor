@@ -1,0 +1,57 @@
+# CD: after CI succeeds on main, SSH into the EC2 instance and redeploy.
+#
+# One-time setup (GitHub repo → Settings → Secrets and variables → Actions):
+#   EC2_HOST      public IP / DNS of the instance
+#   EC2_SSH_KEY   private key of a key pair dedicated to deployments (full PEM text)
+#   EC2_USER      (optional) defaults to ec2-user
+#   EC2_APP_DIR   (optional) path of the repo on the server, defaults to ~/uptime-monitor
+name: Deploy
+
+on:
+  workflow_run:
+    workflows: [CI]
+    branches: [main]
+    types: [completed]
+  workflow_dispatch:   # manual "Run workflow" button
+
+# Never run two deploys at once; a newer one waits for the current one.
+concurrency:
+  group: deploy
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+jobs:
+  deploy:
+    # Only deploy when CI passed (or when triggered by hand).
+    if: github.event_name == 'workflow_dispatch' || github.event.workflow_run.conclusion == 'success'
+    runs-on: ubuntu-latest
+    environment: production
+    steps:
+      - name: Deploy over SSH
+        env:
+          HOST: ${{ secrets.EC2_HOST }}
+          USER_NAME: ${{ secrets.EC2_USER || 'ec2-user' }}
+          APP_DIR: ${{ secrets.EC2_APP_DIR || '~/uptime-monitor' }}
+          SSH_KEY: ${{ secrets.EC2_SSH_KEY }}
+          # Deploy exactly the commit CI tested, not whatever main is by now.
+          SHA: ${{ github.event.workflow_run.head_sha || github.sha }}
+        run: |
+          install -m 700 -d ~/.ssh
+          printf '%s\n' "$SSH_KEY" > ~/.ssh/deploy_key
+          chmod 600 ~/.ssh/deploy_key
+          ssh-keyscan -H "$HOST" >> ~/.ssh/known_hosts
+          ssh -i ~/.ssh/deploy_key "$USER_NAME@$HOST" \
+            "set -e; cd $APP_DIR && git fetch origin && git checkout --force $SHA && sh deploy/deploy.sh"
+
+      - name: Smoke test
+        env:
+          HOST: ${{ secrets.EC2_HOST }}
+        run: |
+          for i in 1 2 3 4 5 6; do
+            if curl -fsS "http://$HOST/api/health"; then exit 0; fi
+            echo "not healthy yet, retrying..."; sleep 10
+          done
+          echo "Health check failed after deploy" >&2
+          exit 1

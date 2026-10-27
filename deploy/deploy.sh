@@ -13,6 +13,11 @@ fi
 # from backend/.env, so the database password lives in exactly one file.
 COMPOSE="docker compose --env-file backend/.env -f docker-compose.prod.yml"
 
+# Opt-in: send container logs to CloudWatch (set CLOUDWATCH_LOGS=true in backend/.env).
+if grep -q '^CLOUDWATCH_LOGS=true' backend/.env; then
+  COMPOSE="$COMPOSE -f docker-compose.cloudwatch.yml"
+fi
+
 $COMPOSE up -d --build --remove-orphans
 
 # Old image layers pile up with every deploy; on a 20 GB disk that matters.

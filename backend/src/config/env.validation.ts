@@ -27,9 +27,14 @@ class EnvironmentVariables {
   @IsString()
   CORS_ORIGIN: string = 'http://localhost:5173';
 
-  @Transform(({ value }) => value === true || value === 'true')
-  @IsBoolean()
-  TRUST_PROXY: boolean = false;
+  // How many reverse proxies sit in front of the app, so req.ip (used by rate
+  // limiting) is the real client and not a proxy. 0 = none (local dev),
+  // 1 = Nginx only, 2 = CloudFront → Nginx. "true"/"false" still work (= 1 / 0).
+  @Transform(({ value }) => (value === true || value === 'true' ? 1 : value === false || value === 'false' ? 0 : Number(value)))
+  @IsInt()
+  @Min(0)
+  @Max(5)
+  TRUST_PROXY: number = 0;
 
   @IsString()
   DB_HOST: string;

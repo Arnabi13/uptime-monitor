@@ -1,0 +1,83 @@
+# CI: runs on every pull request and every push to main.
+# Deploys are a separate workflow (deploy.yml) that only runs after this one passes on main.
+name: CI
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+# A newer push to the same branch cancels the older run still in progress.
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  backend:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: backend
+    # A real Postgres, same major version as production. The e2e tests run
+    # the actual migrations against it, so schema bugs show up here.
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_USER: uptime
+          POSTGRES_PASSWORD: ci_password
+          POSTGRES_DB: uptime_test
+        ports: ["5432:5432"]
+        options: >-
+          --health-cmd "pg_isready -U uptime -d uptime_test"
+          --health-interval 5s --health-timeout 3s --health-retries 10
+    env:
+      DB_HOST: localhost
+      DB_PORT: "5432"
+      DB_USER: uptime
+      DB_PASSWORD: ci_password
+      DB_NAME: uptime_test
+      DB_TEST_NAME: uptime_test
+      JWT_SECRET: ci-secret-ci-secret-ci-secret-ci-secret-123
+      AWS_REGION: ap-southeast-2
+      SQS_QUEUE_URL: https://sqs.ap-southeast-2.amazonaws.com/000000000000/test-queue
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: backend/package-lock.json
+      # `npm ci` installs exactly what the lockfile says (and fails if it's out of date).
+      - run: npm ci
+      - run: npm run build
+      - run: npm test
+      - run: npm run test:e2e
+
+  frontend:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: frontend
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+      - run: npm ci
+      - run: npm run typecheck
+      - run: npm test
+      - run: npm run build
+
+  docker:
+    # Catches Dockerfile breakage before it reaches the server. Nothing is pushed.
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - run: docker build ./backend
+      - run: docker build ./frontend

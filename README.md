@@ -3,8 +3,8 @@
 Monitor any public website, get an email when it goes down, and share a public status page.
 Built with NestJS, PostgreSQL and React, deployed end to end on AWS.
 
-> **Status: Day 3 of 5 complete** — backend core, the SQS-based checking engine, and the React
-> frontend (dashboard, response-time charts, public status page). AWS deployment follows on Days 4–5.
+> **Status:** feature-complete and deployed on AWS (EC2 + Docker Compose + Nginx, SQS, SES).
+> CloudFront HTTPS, CI/CD (GitHub Actions) and CloudWatch monitoring are described below.
 
 ## Tech stack
 
@@ -16,7 +16,9 @@ Built with NestJS, PostgreSQL and React, deployed end to end on AWS.
 | Local dev | Docker Compose |
 | Checking engine | AWS SQS (scheduler → queue → worker), standard queue + dead-letter queue |
 | Frontend | React 18 + TypeScript, Vite, React Router, TanStack Query, hand-rolled SVG charts |
-| Coming next | EC2 + Nginx + S3/CloudFront (Day 4), GitHub Actions + CloudWatch (Day 5) |
+| Hosting | EC2 (t3.micro) running Docker Compose: Nginx + NestJS + Postgres; CloudFront in front for HTTPS |
+| CI/CD | GitHub Actions: tests on every PR, automatic deploy to EC2 on merge to `main` |
+| Monitoring | CloudWatch Logs + alarm → SNS email |
 
 ## Run it locally
 
@@ -216,6 +218,47 @@ than drawing a misleading straight segment across a pause.
 
 **Container.** Multi-stage build (the TypeScript compiler and dev dependencies never ship), runs as the
 non-root `node` user, has a health check, and `exec`s node so it receives `SIGTERM` for graceful shutdown.
+
+## Architecture
+
+```
+Browser ──HTTPS──▶ CloudFront ──HTTP:80──▶ EC2 (t3.micro, ap-southeast-2)
+                                            ├─ web : Nginx  (React app, /api proxy)
+                                            ├─ api : NestJS (API + scheduler + worker)
+                                            └─ db  : PostgreSQL 16 (volume)
+                                                │
+                                   scheduler ──▶ SQS queue ──▶ worker ──▶ target sites
+                                                (+ DLQ)           └──▶ SES alert emails
+```
+
+Only port 80 (and SSH) is open on the instance; Postgres and the API are reachable only on the
+private Compose network. The instance uses an IAM role (no access keys on the server) with the
+minimum permissions: SQS on one queue, SES send, and CloudWatch Logs.
+
+## Deployment
+
+On the server (once): install Docker, clone the repo, create `backend/.env` from
+`backend/.env.production.example`, then `sh deploy/deploy.sh`. It builds the images, starts the
+stack, runs migrations on API startup and prunes old image layers.
+
+`TRUST_PROXY` must equal the real number of proxies in front of the API (CloudFront → Nginx = 2).
+Too high and a client could spoof its IP with a fake `X-Forwarded-For` and dodge rate limits.
+
+## CI/CD
+
+- `.github/workflows/ci.yml` — on every PR and push to `main`: backend build + unit tests + e2e
+  tests (real Postgres service container running the real migrations), frontend typecheck, tests and
+  build, and a Docker build of both images.
+- `.github/workflows/deploy.yml` — after CI succeeds on `main`, SSHes to EC2, checks out the exact
+  commit CI tested, runs `deploy/deploy.sh`, then polls `/api/health`.
+- Secrets: `EC2_HOST`, `EC2_SSH_KEY` (a key pair used only for deploys), optional `EC2_USER` and
+  `EC2_APP_DIR`.
+
+## Monitoring
+
+Set `CLOUDWATCH_LOGS=true` in `backend/.env` and redeploy: `docker-compose.cloudwatch.yml` switches
+all containers to the `awslogs` driver (log group `uptime-monitor`, 7-day retention). A CloudWatch
+alarm on the instance's `StatusCheckFailed` metric notifies an SNS topic by email.
 
 ## Project structure
 

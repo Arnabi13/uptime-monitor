@@ -21,10 +21,13 @@ export function configureApp(app: NestExpressApplication, config: ConfigService)
       .filter(Boolean),
   });
 
-  // Behind Nginx every request comes from the proxy's IP. Trusting one proxy hop
-  // makes req.ip the real client IP, which rate limiting depends on.
-  if (config.get<boolean>('TRUST_PROXY')) {
-    app.set('trust proxy', 1);
+  // Behind proxies every request comes from the last proxy's IP. Trusting exactly
+  // as many hops as there really are makes req.ip the real client IP (rate
+  // limiting depends on it). Trusting MORE hops than exist would let a client
+  // spoof its IP with a fake X-Forwarded-For header, so this must match reality.
+  const proxyHops = config.get<number>('TRUST_PROXY') ?? 0;
+  if (proxyHops > 0) {
+    app.set('trust proxy', proxyHops);
   }
   app.disable('x-powered-by');
 }

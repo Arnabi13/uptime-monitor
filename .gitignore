@@ -8,3 +8,7 @@ coverage/
 !.env.production.example
 .DS_Store
 npm-debug.log*
+
+# Vite temp files
+vite.config.ts.timestamp-*
+*.tsbuildinfo
