@@ -3,8 +3,11 @@
 Monitor any public website, get an email when it goes down, and share a public status page.
 Built with NestJS, PostgreSQL and React, deployed end to end on AWS.
 
-> **Status:** feature-complete and deployed on AWS (EC2 + Docker Compose + Nginx, SQS, SES).
-> CloudFront HTTPS, CI/CD (GitHub Actions) and CloudWatch monitoring are described below.
+**Live demo:** https://d1bdwrfhv8c6q1.cloudfront.net
+
+> **Status:** complete — deployed on AWS over HTTPS. EC2 + Docker Compose + Nginx behind CloudFront,
+> with the SQS checking engine, SES email alerts, GitHub Actions CI/CD, and CloudWatch logs + an
+> instance health alarm (SNS email).
 
 ## Tech stack
 
